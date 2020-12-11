@@ -1,4 +1,4 @@
-module go.linka.cloud/lb
+module go.linka.cloud/k8s/lb
 
 go 1.13
 
@@ -6,7 +6,6 @@ require (
 	github.com/go-logr/logr v0.1.0
 	github.com/onsi/ginkgo v1.11.0
 	github.com/onsi/gomega v1.8.1
-	github.com/sirupsen/logrus v1.4.2
 	go.uber.org/zap v1.10.0
 	k8s.io/api v0.17.2
 	k8s.io/apimachinery v0.17.2

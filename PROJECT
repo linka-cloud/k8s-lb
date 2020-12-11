@@ -1,3 +1,3 @@
 domain: lb.linka.cloud
-repo: go.linka.cloud/lb
+repo: go.linka.cloud/k8s/lb
 version: "2"

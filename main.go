@@ -29,8 +29,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"go.linka.cloud/lb/controllers"
-	controller2 "go.linka.cloud/lb/pkg/controller"
+	"go.linka.cloud/k8s/lb/controllers"
+	controller2 "go.linka.cloud/k8s/lb/pkg/controller"
 	// +kubebuilder:scaffold:imports
 )
 

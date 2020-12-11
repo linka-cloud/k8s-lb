@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"go.linka.cloud/lb/pkg/controller"
+	"go.linka.cloud/k8s/lb/pkg/controller"
 )
 
 const (

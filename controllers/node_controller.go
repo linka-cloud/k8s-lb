@@ -25,7 +25,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"go.linka.cloud/lb/pkg/controller"
+	"go.linka.cloud/k8s/lb/pkg/controller"
 )
 
 // NodeReconciler reconciles a Node object

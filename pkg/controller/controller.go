@@ -25,8 +25,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"go.linka.cloud/lb/pkg/nodemap"
-	"go.linka.cloud/lb/pkg/service"
+	"go.linka.cloud/k8s/lb/pkg/nodemap"
+	"go.linka.cloud/k8s/lb/pkg/service"
 )
 
 type Controller interface {
