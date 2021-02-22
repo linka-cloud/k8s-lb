@@ -71,7 +71,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	controller := controller2.New(context.Background(), ctrl.Log.WithName("controllers").WithName("controller"), mgr.GetClient())
+	controller := controller2.New(context.Background(), ctrl.Log.WithName("controllers").WithName("Controller"), mgr.GetClient())
 
 	if err = (&controllers.ServiceReconciler{
 		Client: mgr.GetClient(),

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -27,6 +28,11 @@ import (
 
 	"go.linka.cloud/k8s/lb/pkg/nodemap"
 	"go.linka.cloud/k8s/lb/pkg/service"
+)
+
+const (
+	PrivateIPAnnotation = "lb.k8s.linka.cloud/private"
+	PublicIPAnnotation  = "lb.k8s.linka.cloud/public"
 )
 
 type Controller interface {
@@ -57,11 +63,14 @@ type controller struct {
 
 func (c *controller) DeleteService(svc corev1.Service) error {
 	k, _ := client.ObjectKeyFromObject(&svc)
+	// TODO(adphi): check public and/or private
 	for _, v := range svc.Spec.Ports {
 		s := service.Service{
-			Key:   k,
-			Port:  v.Port,
-			Proto: v.Protocol,
+			Key:         k,
+			Name:        k.Name,
+			Port:        v.Port,
+			Proto:       v.Protocol,
+			RequestedIP: svc.Spec.LoadBalancerIP,
 		}
 		c.log.WithValues("request", k).Info("deleting service", "service", s.String())
 		c.services.Delete(s)
@@ -70,18 +79,24 @@ func (c *controller) DeleteService(svc corev1.Service) error {
 }
 
 func (c *controller) ReSync() (ctrl.Result, error) {
-
 	svcs := &corev1.ServiceList{}
-	if err := c.client.List(c.ctx, svcs, client.InNamespace("test")); err != nil {
+	if err := c.client.List(c.ctx, svcs); err != nil {
 		return ctrl.Result{}, err
 	}
-
-	// for _, v := range svcs.Items {
-	// 	if _, err := c.Reconcile(v); err != nil {
-	// 		return ctrl.Result{}, err
-	// 	}
-	// }
-	return ctrl.Result{}, nil
+	requeue := false
+	for _, v := range svcs.Items {
+		if v.Spec.Type != corev1.ServiceTypeLoadBalancer {
+			continue
+		}
+		r, err := c.Reconcile(v)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if r.Requeue {
+			requeue = true
+		}
+	}
+	return ctrl.Result{Requeue: requeue}, nil
 }
 
 func (c *controller) SynNodes() error {
@@ -101,13 +116,8 @@ func (c *controller) SynNodes() error {
 }
 
 func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
-	c.mu.RLock()
-	nodes := c.nodes
-	c.mu.RUnlock()
-	if nodes == nil {
-		if err := c.SynNodes(); err != nil {
-			return ctrl.Result{}, err
-		}
+	if err := c.SynNodes(); err != nil {
+		return ctrl.Result{}, err
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -117,8 +127,13 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 	log := c.log.WithValues("request", k.String())
+	// TODO(adphi): Is it a bug ? Only load balancer services are scheduled to reconcile
+	//  what if the service type changed ?
 	if svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
-		c.log.Info("skipping non loadbalancer service")
+		c.log.Info("removing non loadbalancer service")
+		if err := c.DeleteService(svc); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 	if svc.Spec.IPFamily != nil && *svc.Spec.IPFamily == corev1.IPv6Protocol {
@@ -131,40 +146,24 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 	for _, p := range svc.Spec.Ports {
+		// TODO(adphi): check public and/or private
 		s := service.Service{
-			Key:      k,
-			Proto:    p.Protocol,
-			NodePort: p.NodePort,
-			Port:     p.Port,
+			Key:         k,
+			Name:        p.Name,
+			Proto:       p.Protocol,
+			NodePort:    p.NodePort,
+			Port:        p.Port,
+			RequestedIP: svc.Spec.LoadBalancerIP,
 		}
+
 		log := log.WithValues("endpoint", k)
-		for _, e := range es.Subsets {
-			for _, v := range e.Addresses {
-				if v.NodeName == nil {
-					log.Info("nodename is nil")
-					continue
-				}
-				n, ok := c.nodes.Load(*v.NodeName)
-				if !ok {
-					log.Info("not found", "node", *v.NodeName)
-					continue
-				}
-				var address string
-				for _, v := range n.Status.Addresses {
-					// TODO(adphi): check subnet ??
-					switch v.Type {
-					case corev1.NodeInternalIP:
-						if address == "" {
-							address = v.Address
-						}
-					case corev1.NodeExternalIP:
-						address = v.Address
-					}
-				}
-				if address != "" {
-					s.AddNodeIP(address)
-				}
-			}
+
+		switch svc.Spec.ExternalTrafficPolicy {
+		case corev1.ServiceExternalTrafficPolicyTypeLocal:
+			s.AddNodeIPs(c.MakeLocalEndpoints(log, es)...)
+		// use default as it is what Kubernetes defaults to
+		default:
+			s.AddNodeIPs(c.MakeClusterEndpoints(log)...)
 		}
 		if o, ok := c.services.Load(s); ok && o.Equals(s) {
 			log.Info("skipping as service did not changed", "service", s.String())
@@ -172,8 +171,45 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		}
 		log.Info("should update", "service", s.String())
 		c.services.Store(s)
+
+		// TODO(adphi): replace with real implementation
+		var ings []corev1.LoadBalancerIngress
+		for _, v := range s.NodeIPs {
+			ings = append(ings, corev1.LoadBalancerIngress{IP: v})
+		}
+		svc.Status.LoadBalancer.Ingress = ings
+		if err := c.client.Status().Update(context.Background(), &svc); err != nil {
+			log.Error(err, "failed to update service status")
+			return ctrl.Result{}, err
+		}
 	}
 	return ctrl.Result{}, nil
+}
+
+func (c *controller) MakeLocalEndpoints(log logr.Logger, endpoints corev1.Endpoints) []string {
+	log = log.WithValues("endpoint", fmt.Sprintf("%s/%s", endpoints.Namespace, endpoints.Name))
+	var addrs []string
+	for _, e := range endpoints.Subsets {
+		for _, v := range e.Addresses {
+			if v.NodeName == nil {
+				log.Info("nodename is nil")
+				continue
+			}
+			n, ok := c.nodes.Load(*v.NodeName)
+			if !ok {
+				log.Info("not found", "node", *v.NodeName)
+				continue
+			}
+			if a := nodemap.NodeAddress(n); a != "" {
+				addrs = append(addrs, a)
+			}
+		}
+	}
+	return addrs
+}
+
+func (c *controller) MakeClusterEndpoints(_ logr.Logger) []string {
+	return c.nodes.Addresses()
 }
 
 func (c *controller) NodeMap() nodemap.Map {

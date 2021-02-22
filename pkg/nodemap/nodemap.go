@@ -29,6 +29,7 @@ type Map interface {
 	LoadAndDelete(name string) (node corev1.Node, loaded bool)
 	Delete(node corev1.Node)
 	Range(func(name string, node corev1.Node) (shouldContinue bool))
+	Addresses() []string
 }
 
 func New() Map {
@@ -75,4 +76,31 @@ func (n *nodemap) Range(f func(name string, node corev1.Node) (shouldContinue bo
 	n.m.Range(func(key, value interface{}) bool {
 		return f(key.(string), value.(corev1.Node))
 	})
+}
+
+func (n *nodemap) Addresses() []string {
+	var addrs []string
+	n.Range(func(_ string, node corev1.Node) bool {
+		if a := NodeAddress(node); a != "" {
+			addrs = append(addrs, a)
+		}
+		return true
+	})
+	return addrs
+}
+
+func NodeAddress(node corev1.Node) string {
+	var address string
+	for _, v := range node.Status.Addresses {
+		// TODO(adphi): check subnet ??
+		switch v.Type {
+		case corev1.NodeInternalIP:
+			if address == "" {
+				address = v.Address
+			}
+		case corev1.NodeExternalIP:
+			address = v.Address
+		}
+	}
+	return address
 }

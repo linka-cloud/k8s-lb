@@ -81,14 +81,23 @@ func (s *svcmap) Range(f func(svc Service) (shouldContinue bool)) {
 }
 
 type Service struct {
-	Key      client.ObjectKey
-	Port     int32
-	Proto    corev1.Protocol
-	NodePort int32
-	NodeIPs  []string
+	Key         client.ObjectKey
+	Name        string
+	Port        int32
+	Proto       corev1.Protocol
+	NodePort    int32
+	NodeIPs     []string
+	RequestedIP string
+	Private     bool
 }
 
-func (s *Service) AddNodeIP(ip string) {
+func (s *Service) AddNodeIPs(ip ...string) {
+	for _, v := range ip {
+		s.addNodeIP(v)
+	}
+}
+
+func (s *Service) addNodeIP(ip string) {
 	for _, v := range s.NodeIPs {
 		if v == ip {
 			return
@@ -103,7 +112,7 @@ func (s Service) Equals(o Service) bool {
 }
 
 func (s Service) String() string {
-	return fmt.Sprintf("%s port: %d, proto: %s nodeport: %d, ips: %v", s.Key.String(), s.Port, s.Proto, s.NodePort, s.NodeIPs)
+	return fmt.Sprintf("%s name: %s, port: %d, proto: %s, nodeport: %d, ips: %v", s.Key.String(), s.Name, s.Port, s.Proto, s.NodePort, s.NodeIPs)
 }
 
 func (s Service) key() string {
