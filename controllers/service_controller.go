@@ -53,8 +53,11 @@ func (r *ServiceReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	// your logic here
 	s := corev1.Service{}
 	if err := r.Get(ctx, req.NamespacedName, &s); err != nil {
-		log.Error(err, "unable to fetch node")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if err := client.IgnoreNotFound(err); err != nil {
+			log.Error(err, "unable to fetch service")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
 	if !s.DeletionTimestamp.IsZero() {
 		if err := r.Ctrl.DeleteService(s); err != nil {

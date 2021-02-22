@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -29,11 +30,7 @@ import (
 	"go.linka.cloud/k8s/lb/pkg/nodemap"
 	"go.linka.cloud/k8s/lb/pkg/recorder"
 	"go.linka.cloud/k8s/lb/pkg/service"
-)
-
-const (
-	PrivateIPAnnotation = "lb.k8s.linka.cloud/private"
-	PublicIPAnnotation  = "lb.k8s.linka.cloud/public"
+	"go.linka.cloud/k8s/lb/provider"
 )
 
 type Controller interface {
@@ -44,24 +41,39 @@ type Controller interface {
 	Services() service.Map
 }
 
-func New(ctx context.Context, log logr.Logger, client client.Client, rec recorder.Recorder) Controller {
+func New(ctx context.Context, client client.Client, rec recorder.Recorder, prov provider.Provider, opts ...Option) (Controller, error) {
+	if client == nil {
+		return nil, errors.New("client is required")
+	}
+	if rec == nil {
+		return nil, errors.New("recorder is required")
+	}
+	if prov == nil {
+		return nil, errors.New("provider is required")
+	}
+	o := defaultOptions
+	for _, v := range opts {
+		v(&o)
+	}
 	return &controller{
 		ctx:      ctx,
-		log:      log,
 		client:   client,
 		rec:      rec,
+		prov:     prov,
 		services: service.NewMap(),
-	}
+		options:  &o,
+	}, nil
 }
 
 type controller struct {
 	ctx      context.Context
-	log      logr.Logger
 	client   client.Client
+	prov     provider.Provider
 	rec      recorder.Recorder
 	nodes    nodemap.Map
 	services service.Map
 	mu       sync.RWMutex
+	*options
 }
 
 func (c *controller) DeleteService(svc corev1.Service) error {
@@ -75,8 +87,26 @@ func (c *controller) DeleteService(svc corev1.Service) error {
 			Proto:       v.Protocol,
 			RequestedIP: svc.Spec.LoadBalancerIP,
 		}
-		c.log.WithValues("request", k).Info("deleting service", "service", s.String())
+		c.Log.WithValues("request", k).Info("deleting service", "service", s.String())
 		c.services.Delete(s)
+		ip, err := c.prov.Delete(s)
+		if err != nil {
+			return err
+		}
+		if !contains(svc.Status.LoadBalancer.Ingress, ip) {
+			continue
+		}
+		// TODO(adphi): we could loose the loadbalancer IP track if we successfully removed the loadbalancer but failed to update the status
+		var ings []corev1.LoadBalancerIngress
+		for _, v := range svc.Status.LoadBalancer.Ingress {
+			if v.IP != ip {
+				ings = append(ings, v)
+			}
+		}
+		if err := c.client.Status().Update(c.ctx, &svc); err != nil {
+			c.Log.Error(err, "failed to remove loadbalancer ip from status")
+			return err
+		}
 	}
 	return nil
 }
@@ -126,21 +156,21 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 	defer c.mu.RUnlock()
 	k, err := client.ObjectKeyFromObject(&svc)
 	if err != nil {
-		c.log.Error(err, "object key")
+		c.Log.Error(err, "object key")
 		return ctrl.Result{}, err
 	}
-	log := c.log.WithValues("request", k.String())
-	// TODO(adphi): Is it a bug ? Only load balancer services are scheduled to reconcile
-	//  what if the service type changed ?
+	log := c.Log.WithValues("request", k.String())
+
 	if svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
-		c.log.Info("removing non loadbalancer service")
+		c.Log.Info("removing non loadbalancer service")
 		if err := c.DeleteService(svc); err != nil {
 			return ctrl.Result{}, err
 		}
+		// TODO(adphi): update status
 		return ctrl.Result{}, nil
 	}
 	if svc.Spec.IPFamily != nil && *svc.Spec.IPFamily == corev1.IPv6Protocol {
-		c.log.Info("ipv6 unsupported")
+		c.Log.Info("ipv6 unsupported")
 		return ctrl.Result{}, nil
 	}
 	es := corev1.Endpoints{}
@@ -150,6 +180,7 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 	}
 	for _, p := range svc.Spec.Ports {
 		// TODO(adphi): check public and/or private
+		// TODO(adphi): check if we should delete a private / public loadbalancer
 		s := service.Service{
 			Key:         k,
 			Name:        p.Name,
@@ -172,16 +203,17 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 			log.Info("skipping as service did not changed", "service", s.String())
 			continue
 		}
-		log.Info("should update", "service", s.String())
 		c.services.Store(s)
-
-		// TODO(adphi): replace with real implementation
-		var ings []corev1.LoadBalancerIngress
-		for _, v := range s.NodeIPs {
-			ings = append(ings, corev1.LoadBalancerIngress{IP: v})
+		ip, err := c.prov.Set(s)
+		if err != nil {
+			return ctrl.Result{}, err
 		}
-		svc.Status.LoadBalancer.Ingress = ings
-		if err := c.client.Status().Update(context.Background(), &svc); err != nil {
+		if contains(svc.Status.LoadBalancer.Ingress, ip) {
+			c.Log.Info("skipping as IP already defined in status", "ip", ip)
+			continue
+		}
+		svc.Status.LoadBalancer.Ingress = append(svc.Status.LoadBalancer.Ingress, corev1.LoadBalancerIngress{IP: ip})
+		if err := c.client.Status().Update(c.ctx, &svc); err != nil {
 			log.Error(err, "failed to update service status")
 			return ctrl.Result{}, err
 		}
@@ -221,4 +253,13 @@ func (c *controller) NodeMap() nodemap.Map {
 
 func (c *controller) Services() service.Map {
 	return c.services
+}
+
+func contains(ings []corev1.LoadBalancerIngress, ip string) bool {
+	for _, v := range ings {
+		if v.IP == ip {
+			return true
+		}
+	}
+	return false
 }

@@ -44,8 +44,11 @@ func (r *NodeReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("node", req.NamespacedName)
 	node := corev1.Node{}
 	if err := r.Get(ctx, req.NamespacedName, &node); err != nil {
-		log.Error(err, "unable to fetch node")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if err := client.IgnoreNotFound(err); err != nil {
+			log.Error(err, "unable to fetch node")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
 	return r.Ctrl.ReSync()
 }
