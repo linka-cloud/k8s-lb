@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"go.linka.cloud/k8s/lb/pkg/nodemap"
+	"go.linka.cloud/k8s/lb/pkg/recorder"
 	"go.linka.cloud/k8s/lb/pkg/service"
 )
 
@@ -43,11 +44,12 @@ type Controller interface {
 	Services() service.Map
 }
 
-func New(ctx context.Context, log logr.Logger, client client.Client) Controller {
+func New(ctx context.Context, log logr.Logger, client client.Client, rec recorder.Recorder) Controller {
 	return &controller{
 		ctx:      ctx,
 		log:      log,
 		client:   client,
+		rec:      rec,
 		services: service.NewMap(),
 	}
 }
@@ -56,6 +58,7 @@ type controller struct {
 	ctx      context.Context
 	log      logr.Logger
 	client   client.Client
+	rec      recorder.Recorder
 	nodes    nodemap.Map
 	services service.Map
 	mu       sync.RWMutex

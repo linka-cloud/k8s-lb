@@ -31,6 +31,7 @@ import (
 
 	"go.linka.cloud/k8s/lb/controllers"
 	controller2 "go.linka.cloud/k8s/lb/pkg/controller"
+	"go.linka.cloud/k8s/lb/pkg/recorder"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -71,7 +72,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	controller := controller2.New(context.Background(), ctrl.Log.WithName("controllers").WithName("Controller"), mgr.GetClient())
+	controller := controller2.New(
+		context.Background(),
+		ctrl.Log.WithName("controllers").WithName("Controller"),
+		mgr.GetClient(),
+		recorder.New(mgr.GetEventRecorderFor("lb.k8s.linka.cloud")),
+	)
 
 	if err = (&controllers.ServiceReconciler{
 		Client: mgr.GetClient(),
