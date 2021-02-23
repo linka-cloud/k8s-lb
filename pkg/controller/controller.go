@@ -94,6 +94,7 @@ func (c *controller) DeleteService(svc corev1.Service) error {
 			return err
 		}
 		if !contains(svc.Status.LoadBalancer.Ingress, ip) {
+			c.Log.Info("skipping status update as IP already not there")
 			continue
 		}
 		// TODO(adphi): we could loose the loadbalancer IP track if we successfully removed the loadbalancer but failed to update the status
@@ -103,6 +104,7 @@ func (c *controller) DeleteService(svc corev1.Service) error {
 				ings = append(ings, v)
 			}
 		}
+		svc.Status.LoadBalancer.Ingress = ings
 		if err := c.client.Status().Update(c.ctx, &svc); err != nil {
 			c.Log.Error(err, "failed to remove loadbalancer ip from status")
 			return err
@@ -207,6 +209,10 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		ip, err := c.prov.Set(s)
 		if err != nil {
 			return ctrl.Result{}, err
+		}
+		if ip == "" {
+			c.Log.Error(errors.New("provider returned an empty IP"), "provider failed to provide an IP")
+			continue
 		}
 		if contains(svc.Status.LoadBalancer.Ingress, ip) {
 			c.Log.Info("skipping as IP already defined in status", "ip", ip)

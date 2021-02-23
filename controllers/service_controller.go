@@ -60,6 +60,7 @@ func (r *ServiceReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, nil
 	}
 	if !s.DeletionTimestamp.IsZero() {
+		log.Info("removing")
 		if err := r.Ctrl.DeleteService(s); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -111,7 +112,7 @@ func (f *filter) Create(event event.CreateEvent) bool {
 }
 
 func (f *filter) Delete(event event.DeleteEvent) bool {
-	return f.filterType(event.Object)
+	return true
 }
 
 func (f *filter) Update(event event.UpdateEvent) bool {
