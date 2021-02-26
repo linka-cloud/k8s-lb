@@ -25,14 +25,14 @@ type noop struct {
 
 func (n *noop) Set(svc service.Service) (string, error) {
 	n.log.Info("should create / update", "service", svc.String(), "lbIP", ip)
-	n.Map.Store(svc.Name, ip)
+	n.Map.Store(svc.Key.String(), ip)
 	return ip, nil
 }
 
 func (n *noop) Delete(svc service.Service) (oldIP string, err error) {
 	n.log.Info("should delete", "service", svc.String())
-	defer n.Map.Delete(svc.Name)
-	if ip, ok := n.Map.Load(svc.Name); ok {
+	defer n.Map.Delete(svc.Key.String())
+	if ip, ok := n.Map.Load(svc.Key.String()); ok {
 		return ip.(string), nil
 	}
 	return "", nil

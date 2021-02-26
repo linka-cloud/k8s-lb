@@ -19,6 +19,7 @@ package service
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -82,13 +83,22 @@ func (s *svcmap) Range(f func(svc Service) (shouldContinue bool)) {
 
 type Service struct {
 	Key         client.ObjectKey
-	Name        string
-	Port        int32
-	Proto       corev1.Protocol
-	NodePort    int32
+	Ports       []Port
 	NodeIPs     []string
 	RequestedIP string
+	IP          string
 	Private     bool
+}
+
+type Port struct {
+	Name     string
+	Proto    corev1.Protocol
+	NodePort int32
+	Port     int32
+}
+
+func (p Port) String() string {
+	return fmt.Sprintf("name: %s, port: %d, proto: %s, nodeport: %d", p.Name, p.Port, p.Proto, p.NodePort)
 }
 
 func (s *Service) AddNodeIPs(ip ...string) {
@@ -108,13 +118,25 @@ func (s *Service) addNodeIP(ip string) {
 }
 
 func (s Service) Equals(o Service) bool {
+	sortPorts(s.Ports)
+	sortPorts(o.Ports)
 	return s.String() == o.String()
 }
 
 func (s Service) String() string {
-	return fmt.Sprintf("%s name: %s, port: %d, proto: %s, nodeport: %d, ips: %v", s.Key.String(), s.Name, s.Port, s.Proto, s.NodePort, s.NodeIPs)
+	var ports []string
+	for _, v := range s.Ports {
+		ports = append(ports, v.String())
+	}
+	return fmt.Sprintf("%s ports: [%s], ips: %v", s.Key.String(), strings.Join(ports, "; "), s.NodeIPs)
 }
 
 func (s Service) key() string {
-	return fmt.Sprintf("%s/%d/%s", s.Proto, s.Port, s.Key)
+	return s.Key.String()
+}
+
+func sortPorts(ports []Port) {
+	sort.Slice(ports, func(i, j int) bool {
+		return sort.StringsAreSorted([]string{ports[i].Name, ports[j].Name})
+	})
 }

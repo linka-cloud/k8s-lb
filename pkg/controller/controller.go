@@ -35,7 +35,6 @@ import (
 
 type Controller interface {
 	Reconcile(svc corev1.Service) (ctrl.Result, error)
-	ReSync() (ctrl.Result, error)
 	DeleteService(svc corev1.Service) error
 	NodeMap() nodemap.Map
 	Services() service.Map
@@ -79,59 +78,41 @@ type controller struct {
 func (c *controller) DeleteService(svc corev1.Service) error {
 	k, _ := client.ObjectKeyFromObject(&svc)
 	// TODO(adphi): check public and/or private
+	s := service.Service{
+		Key:         k,
+		RequestedIP: svc.Spec.LoadBalancerIP,
+	}
 	for _, v := range svc.Spec.Ports {
-		s := service.Service{
-			Key:         k,
-			Name:        k.Name,
-			Port:        v.Port,
-			Proto:       v.Protocol,
-			RequestedIP: svc.Spec.LoadBalancerIP,
+		s.Ports = append(s.Ports, service.Port{
+			Name:     v.Name,
+			Port:     v.Port,
+			Proto:    v.Protocol,
+			NodePort: v.NodePort,
+		})
+	}
+	c.Log.WithValues("request", k).V(5).Info("deleting service", "service", s.String())
+	c.services.Delete(s)
+	ip, err := c.prov.Delete(s)
+	if err != nil {
+		return err
+	}
+	if !contains(svc.Status.LoadBalancer.Ingress, ip) {
+		c.Log.V(5).Info("skipping status update as IP already not there")
+		return nil
+	}
+	// TODO(adphi): we could loose the loadbalancer IP track if we successfully removed the loadbalancer but failed to update the status
+	var ings []corev1.LoadBalancerIngress
+	for _, v := range svc.Status.LoadBalancer.Ingress {
+		if v.IP != ip {
+			ings = append(ings, v)
 		}
-		c.Log.WithValues("request", k).Info("deleting service", "service", s.String())
-		c.services.Delete(s)
-		ip, err := c.prov.Delete(s)
-		if err != nil {
-			return err
-		}
-		if !contains(svc.Status.LoadBalancer.Ingress, ip) {
-			c.Log.Info("skipping status update as IP already not there")
-			continue
-		}
-		// TODO(adphi): we could loose the loadbalancer IP track if we successfully removed the loadbalancer but failed to update the status
-		var ings []corev1.LoadBalancerIngress
-		for _, v := range svc.Status.LoadBalancer.Ingress {
-			if v.IP != ip {
-				ings = append(ings, v)
-			}
-		}
-		svc.Status.LoadBalancer.Ingress = ings
-		if err := c.client.Status().Update(c.ctx, &svc); err != nil {
-			c.Log.Error(err, "failed to remove loadbalancer ip from status")
-			return err
-		}
+	}
+	svc.Status.LoadBalancer.Ingress = ings
+	if err := c.client.Status().Update(c.ctx, &svc); err != nil {
+		c.Log.Error(err, "failed to remove loadbalancer ip from status")
+		return err
 	}
 	return nil
-}
-
-func (c *controller) ReSync() (ctrl.Result, error) {
-	svcs := &corev1.ServiceList{}
-	if err := c.client.List(c.ctx, svcs); err != nil {
-		return ctrl.Result{}, err
-	}
-	requeue := false
-	for _, v := range svcs.Items {
-		if v.Spec.Type != corev1.ServiceTypeLoadBalancer {
-			continue
-		}
-		r, err := c.Reconcile(v)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if r.Requeue {
-			requeue = true
-		}
-	}
-	return ctrl.Result{Requeue: requeue}, nil
 }
 
 func (c *controller) SynNodes() error {
@@ -180,49 +161,51 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		log.Error(err, "retrieve endpoint")
 		return ctrl.Result{}, err
 	}
-	for _, p := range svc.Spec.Ports {
+	s := service.Service{
+		Key:         k,
+		RequestedIP: svc.Spec.LoadBalancerIP,
+	}
+	for _, v := range svc.Spec.Ports {
 		// TODO(adphi): check public and/or private
 		// TODO(adphi): check if we should delete a private / public loadbalancer
-		s := service.Service{
-			Key:         k,
-			Name:        p.Name,
-			Proto:       p.Protocol,
-			NodePort:    p.NodePort,
-			Port:        p.Port,
-			RequestedIP: svc.Spec.LoadBalancerIP,
-		}
+		s.Ports = append(s.Ports, service.Port{
+			Name:     v.Name,
+			Port:     v.Port,
+			Proto:    v.Protocol,
+			NodePort: v.NodePort,
+		})
 
-		log := log.WithValues("endpoint", k)
+	}
+	log = log.WithValues("endpoint", k)
 
-		switch svc.Spec.ExternalTrafficPolicy {
-		case corev1.ServiceExternalTrafficPolicyTypeLocal:
-			s.AddNodeIPs(c.MakeLocalEndpoints(log, es)...)
-		// use default as it is what Kubernetes defaults to
-		default:
-			s.AddNodeIPs(c.MakeClusterEndpoints(log)...)
-		}
-		if o, ok := c.services.Load(s); ok && o.Equals(s) {
-			log.Info("skipping as service did not changed", "service", s.String())
-			continue
-		}
-		c.services.Store(s)
-		ip, err := c.prov.Set(s)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if ip == "" {
-			c.Log.Error(errors.New("provider returned an empty IP"), "provider failed to provide an IP")
-			continue
-		}
-		if contains(svc.Status.LoadBalancer.Ingress, ip) {
-			c.Log.Info("skipping as IP already defined in status", "ip", ip)
-			continue
-		}
-		svc.Status.LoadBalancer.Ingress = append(svc.Status.LoadBalancer.Ingress, corev1.LoadBalancerIngress{IP: ip})
-		if err := c.client.Status().Update(c.ctx, &svc); err != nil {
-			log.Error(err, "failed to update service status")
-			return ctrl.Result{}, err
-		}
+	switch svc.Spec.ExternalTrafficPolicy {
+	case corev1.ServiceExternalTrafficPolicyTypeLocal:
+		s.AddNodeIPs(c.MakeLocalEndpoints(log, es)...)
+	// use default as it is what Kubernetes defaults to
+	default:
+		s.AddNodeIPs(c.MakeClusterEndpoints(log)...)
+	}
+	if o, ok := c.services.Load(s); ok && o.Equals(s) {
+		log.V(5).Info("skipping as service did not changed", "service", s.String())
+		return ctrl.Result{}, nil
+	}
+	c.services.Store(s)
+	ip, err := c.prov.Set(s)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if ip == "" {
+		c.Log.Error(errors.New("provider returned an empty IP"), "provider failed to provide an IP")
+		return ctrl.Result{}, nil
+	}
+	if contains(svc.Status.LoadBalancer.Ingress, ip) {
+		c.Log.V(5).Info("skipping as IP already defined in status", "ip", ip)
+		return ctrl.Result{}, nil
+	}
+	svc.Status.LoadBalancer.Ingress = append(svc.Status.LoadBalancer.Ingress, corev1.LoadBalancerIngress{IP: ip})
+	if err := c.client.Status().Update(c.ctx, &svc); err != nil {
+		log.Error(err, "failed to update service status")
+		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }
