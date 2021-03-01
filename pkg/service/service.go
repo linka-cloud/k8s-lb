@@ -129,7 +129,7 @@ func (s Service) String() string {
 	for _, v := range s.Ports {
 		ports = append(ports, v.String())
 	}
-	return fmt.Sprintf("%s ports: [%s], ips: %v", s.Key.String(), strings.Join(ports, "; "), s.NodeIPs)
+	return fmt.Sprintf("%s [private: %v] ports: [%s], ips: %v", s.Key.String(), s.Private, strings.Join(ports, "; "), s.NodeIPs)
 }
 
 func (s Service) key() string {

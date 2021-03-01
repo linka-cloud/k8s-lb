@@ -23,10 +23,14 @@ type noop struct {
 	sync.Map
 }
 
-func (n *noop) Set(svc service.Service) (string, error) {
+func (n *noop) Set(svc service.Service) (string, string, error) {
 	n.log.Info("should create / update", "service", svc.String(), "lbIP", ip)
+	var old string
+	if v, ok := n.Map.Load(svc.Key.String()); ok {
+		old = v.(string)
+	}
 	n.Map.Store(svc.Key.String(), ip)
-	return ip, nil
+	return ip, old, nil
 }
 
 func (n *noop) Delete(svc service.Service) (oldIP string, err error) {

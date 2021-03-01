@@ -204,7 +204,7 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		return ctrl.Result{}, nil
 	}
 	c.services.Store(s)
-	ip, err := c.prov.Set(s)
+	ip, old, err := c.prov.Set(s)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -212,11 +212,18 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		c.Log.Error(errors.New("provider returned an empty IP"), "provider failed to provide an IP")
 		return ctrl.Result{}, nil
 	}
-	if contains(svc.Status.LoadBalancer.Ingress, ip) {
+	if (ip == old || old == "") && contains(svc.Status.LoadBalancer.Ingress, ip) {
 		c.Log.V(5).Info("skipping as IP already defined in status", "ip", ip)
 		return ctrl.Result{}, nil
 	}
-	svc.Status.LoadBalancer.Ingress = append(svc.Status.LoadBalancer.Ingress, corev1.LoadBalancerIngress{IP: ip})
+	var ings []corev1.LoadBalancerIngress
+	for _, v := range svc.Status.LoadBalancer.Ingress {
+		if v.IP == old || v.IP == ip {
+			continue
+		}
+		ings = append(ings, v)
+	}
+	svc.Status.LoadBalancer.Ingress = append(ings, corev1.LoadBalancerIngress{IP: ip})
 	if err := c.client.Status().Update(c.ctx, &svc); err != nil {
 		log.Error(err, "failed to update service status")
 		return ctrl.Result{}, err

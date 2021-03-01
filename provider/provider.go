@@ -5,6 +5,6 @@ import (
 )
 
 type Provider interface {
-	Set(svc service.Service) (ip string, err error)
+	Set(svc service.Service) (newIP string, oldIP string, err error)
 	Delete(svc service.Service) (oldIP string, err error)
 }

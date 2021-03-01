@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	ServiceFinalizer = "lb.k8s.linka.cloud/finalizer"
+	ServiceFinalizer = "service.kubernetes.io/load-balancer-cleanup"
 )
 
 // ServiceReconciler reconciles a Service object
