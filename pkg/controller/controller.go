@@ -154,6 +154,7 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		return ctrl.Result{}, nil
 	}
 	if svc.Spec.IPFamily != nil && *svc.Spec.IPFamily == corev1.IPv6Protocol {
+		c.rec.Warn(&svc, "Unsupported", "IPv6 not supported")
 		c.Log.Info("ipv6 unsupported")
 		return ctrl.Result{}, nil
 	}
@@ -167,9 +168,20 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		RequestedIP: svc.Spec.LoadBalancerIP,
 		Src:         svc,
 	}
+	// check public or private IP
+	_, isPublic := svc.Annotations[c.PublicIPAnnotation]
+	_, isPrivate := svc.Annotations[c.PrivateIPAnnotation]
+	switch {
+	case isPublic && isPrivate:
+		s.Private = c.DefaultsToPrivateIP
+	case isPublic:
+		s.Private = false
+	case isPrivate:
+		s.Private = true
+	default:
+		s.Private = c.DefaultsToPrivateIP
+	}
 	for _, v := range svc.Spec.Ports {
-		// TODO(adphi): check public and/or private
-		// TODO(adphi): check if we should delete a private / public loadbalancer
 		s.Ports = append(s.Ports, service.Port{
 			Name:     v.Name,
 			Port:     v.Port,

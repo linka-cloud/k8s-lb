@@ -13,6 +13,7 @@ const (
 type options struct {
 	PrivateIPAnnotation string
 	PublicIPAnnotation  string
+	DefaultsToPrivateIP bool
 	Log                 logr.Logger
 }
 
@@ -37,8 +38,14 @@ func WithPrivateIPAnnotation(a string) Option {
 func WithPublicIPAnnotation(a string) Option {
 	return func(o *options) {
 		if a != "" {
-			o.PrivateIPAnnotation = a
+			o.PublicIPAnnotation = a
 		}
+	}
+}
+
+func WithDefaultsToPrivateIP(b bool) Option {
+	return func(o *options) {
+		o.DefaultsToPrivateIP = b
 	}
 }
 
