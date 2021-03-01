@@ -88,6 +88,7 @@ type Service struct {
 	RequestedIP string
 	IP          string
 	Private     bool
+	Src         corev1.Service
 }
 
 type Port struct {

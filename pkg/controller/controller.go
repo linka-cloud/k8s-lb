@@ -81,6 +81,7 @@ func (c *controller) DeleteService(svc corev1.Service) error {
 	s := service.Service{
 		Key:         k,
 		RequestedIP: svc.Spec.LoadBalancerIP,
+		Src:         svc,
 	}
 	for _, v := range svc.Spec.Ports {
 		s.Ports = append(s.Ports, service.Port{
@@ -164,6 +165,7 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 	s := service.Service{
 		Key:         k,
 		RequestedIP: svc.Spec.LoadBalancerIP,
+		Src:         svc,
 	}
 	for _, v := range svc.Spec.Ports {
 		// TODO(adphi): check public and/or private
