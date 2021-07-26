@@ -14,6 +14,7 @@ type options struct {
 	PrivateIPAnnotation string
 	PublicIPAnnotation  string
 	DefaultsToPrivateIP bool
+	MultipleClusterLB   bool
 	Log                 logr.Logger
 }
 
@@ -46,6 +47,12 @@ func WithPublicIPAnnotation(a string) Option {
 func WithDefaultsToPrivateIP(b bool) Option {
 	return func(o *options) {
 		o.DefaultsToPrivateIP = b
+	}
+}
+
+func WithMultipleClusterLB(b bool) Option {
+	return func(o *options) {
+		o.MultipleClusterLB = b
 	}
 }
 

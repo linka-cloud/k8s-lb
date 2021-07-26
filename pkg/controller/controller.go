@@ -217,11 +217,13 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		return ctrl.Result{}, nil
 	}
 	var ings []corev1.LoadBalancerIngress
-	for _, v := range svc.Status.LoadBalancer.Ingress {
-		if v.IP == old || v.IP == ip {
-			continue
+	if c.options.MultipleClusterLB {
+		for _, v := range svc.Status.LoadBalancer.Ingress {
+			if v.IP == old || v.IP == ip {
+				continue
+			}
+			ings = append(ings, v)
 		}
-		ings = append(ings, v)
 	}
 	svc.Status.LoadBalancer.Ingress = append(ings, corev1.LoadBalancerIngress{IP: ip})
 	if err := c.client.Status().Update(c.ctx, &svc); err != nil {
