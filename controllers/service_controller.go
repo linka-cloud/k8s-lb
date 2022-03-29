@@ -75,7 +75,7 @@ func (r *ServiceReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		}
 		return ctrl.Result{}, nil
 	}
-	if !hasFinalizer(s) {
+	if !hasFinalizer(s) && s.Spec.Type == corev1.ServiceTypeLoadBalancer {
 		s.Finalizers = append(s.Finalizers, ServiceFinalizer)
 		if err := r.Update(context.Background(), &s); err != nil {
 			return ctrl.Result{}, err
@@ -100,7 +100,7 @@ type filter struct {
 func (f *filter) filterType(obj runtime.Object) bool {
 	switch o := obj.(type) {
 	case *corev1.Service:
-		return o.Spec.Type == corev1.ServiceTypeLoadBalancer
+		return o.Spec.Type == corev1.ServiceTypeLoadBalancer || hasFinalizer(*o)
 	}
 	k, _ := client.ObjectKeyFromObject(obj)
 	s := corev1.Service{}
