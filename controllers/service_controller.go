@@ -49,8 +49,7 @@ type ServiceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
-func (r *ServiceReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	ctx := context.Background()
+func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("service", req.NamespacedName)
 
 	// your logic here
@@ -64,47 +63,48 @@ func (r *ServiceReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	}
 	if !s.DeletionTimestamp.IsZero() {
 		log.Info("removing")
-		if err := r.Ctrl.DeleteService(s); err != nil {
+		if err := r.Ctrl.DeleteService(ctx, s); err != nil {
 			return ctrl.Result{}, err
 		}
 		if ok := removeFinalizer(&s); !ok {
 			return ctrl.Result{}, nil
 		}
-		if err := r.Update(context.Background(), &s); err != nil {
+		if err := r.Update(ctx, &s); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
 	if !hasFinalizer(s) && s.Spec.Type == corev1.ServiceTypeLoadBalancer {
 		s.Finalizers = append(s.Finalizers, ServiceFinalizer)
-		if err := r.Update(context.Background(), &s); err != nil {
+		if err := r.Update(ctx, &s); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
-	return r.Ctrl.Reconcile(s)
+	return r.Ctrl.Reconcile(ctx, s)
 }
 
-func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ServiceReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Service{}).
 		Watches(&source.Kind{Type: &corev1.Endpoints{}}, &handler.EnqueueRequestForObject{}).
-		WithEventFilter(&filter{mgr.GetClient()}).
+		WithEventFilter(&filter{ctx: ctx, c: mgr.GetClient()}).
 		Complete(r)
 }
 
 type filter struct {
-	c client.Client
+	ctx context.Context
+	c   client.Client
 }
 
-func (f *filter) filterType(obj runtime.Object) bool {
+func (f *filter) filterType(obj client.Object) bool {
 	switch o := obj.(type) {
 	case *corev1.Service:
 		return o.Spec.Type == corev1.ServiceTypeLoadBalancer || hasFinalizer(*o)
 	}
-	k, _ := client.ObjectKeyFromObject(obj)
+	k := client.ObjectKeyFromObject(obj)
 	s := corev1.Service{}
-	if err := f.c.Get(context.Background(), k, &s); err != nil {
+	if err := f.c.Get(f.ctx, k, &s); err != nil {
 		return false
 	}
 	return f.filterType(&s)

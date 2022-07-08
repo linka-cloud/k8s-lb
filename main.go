@@ -49,6 +49,9 @@ func init() {
 }
 
 func main() {
+	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
+	defer cancel()
+
 	var metricsAddr string
 	var enableLeaderElection bool
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
@@ -74,7 +77,7 @@ func main() {
 	}
 
 	controller, err := controller2.New(
-		context.Background(),
+		ctx,
 		mgr.GetClient(),
 		recorder.New(mgr.GetEventRecorderFor("lb.k8s.linka.cloud")),
 		noop.New(),
@@ -90,14 +93,14 @@ func main() {
 		Log:    ctrl.Log.WithName("controllers").WithName("Service"),
 		Scheme: mgr.GetScheme(),
 		Ctrl:   controller,
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Service")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

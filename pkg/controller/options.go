@@ -22,9 +22,7 @@ type Option func(o *options)
 
 func WithLogger(log logr.Logger) Option {
 	return func(o *options) {
-		if log != nil {
-			o.Log = log
-		}
+		o.Log = log
 	}
 }
 

@@ -1,6 +1,7 @@
 package noop
 
 import (
+	"context"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -23,7 +24,7 @@ type noop struct {
 	sync.Map
 }
 
-func (n *noop) Set(svc service.Service) (string, string, error) {
+func (n *noop) Set(_ context.Context, svc service.Service) (string, string, error) {
 	n.log.Info("should create / update", "service", svc.String(), "lbIP", ip)
 	var old string
 	if v, ok := n.Map.Load(svc.Key.String()); ok {
@@ -33,7 +34,7 @@ func (n *noop) Set(svc service.Service) (string, string, error) {
 	return ip, old, nil
 }
 
-func (n *noop) Delete(svc service.Service) (oldIP string, err error) {
+func (n *noop) Delete(_ context.Context, svc service.Service) (oldIP string, err error) {
 	n.log.Info("should delete", "service", svc.String())
 	defer n.Map.Delete(svc.Key.String())
 	if ip, ok := n.Map.Load(svc.Key.String()); ok {

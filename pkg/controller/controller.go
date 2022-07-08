@@ -34,8 +34,8 @@ import (
 )
 
 type Controller interface {
-	Reconcile(svc corev1.Service) (ctrl.Result, error)
-	DeleteService(svc corev1.Service) error
+	Reconcile(ctx context.Context, svc corev1.Service) (ctrl.Result, error)
+	DeleteService(ctx context.Context, svc corev1.Service) error
 	NodeMap() nodemap.Map
 	Services() service.Map
 }
@@ -55,7 +55,6 @@ func New(ctx context.Context, client client.Client, rec recorder.Recorder, prov 
 		v(&o)
 	}
 	return &controller{
-		ctx:      ctx,
 		client:   client,
 		rec:      rec,
 		prov:     prov,
@@ -65,7 +64,6 @@ func New(ctx context.Context, client client.Client, rec recorder.Recorder, prov 
 }
 
 type controller struct {
-	ctx      context.Context
 	client   client.Client
 	prov     provider.Provider
 	rec      recorder.Recorder
@@ -75,8 +73,8 @@ type controller struct {
 	*options
 }
 
-func (c *controller) DeleteService(svc corev1.Service) error {
-	k, _ := client.ObjectKeyFromObject(&svc)
+func (c *controller) DeleteService(ctx context.Context, svc corev1.Service) error {
+	k := client.ObjectKeyFromObject(&svc)
 	// TODO(adphi): check public and/or private
 	s := service.Service{
 		Key:         k,
@@ -93,7 +91,7 @@ func (c *controller) DeleteService(svc corev1.Service) error {
 	}
 	c.Log.WithValues("request", k).V(5).Info("deleting service", "service", s.String())
 	c.services.Delete(s)
-	ip, err := c.prov.Delete(s)
+	ip, err := c.prov.Delete(ctx, s)
 	if err != nil {
 		return err
 	}
@@ -109,21 +107,21 @@ func (c *controller) DeleteService(svc corev1.Service) error {
 		}
 	}
 	svc.Status.LoadBalancer.Ingress = ings
-	if err := c.client.Status().Update(c.ctx, &svc); err != nil {
+	if err := c.client.Status().Update(ctx, &svc); err != nil {
 		c.Log.Error(err, "failed to remove loadbalancer ip from status")
 		return err
 	}
 	return nil
 }
 
-func (c *controller) SynNodes() error {
+func (c *controller) SynNodes(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.nodes == nil {
 		c.nodes = nodemap.New()
 	}
 	ns := &corev1.NodeList{}
-	if err := c.client.List(c.ctx, ns); err != nil {
+	if err := c.client.List(ctx, ns); err != nil {
 		return err
 	}
 	for _, v := range ns.Items {
@@ -132,34 +130,52 @@ func (c *controller) SynNodes() error {
 	return nil
 }
 
-func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
-	if err := c.SynNodes(); err != nil {
+func (c *controller) Reconcile(ctx context.Context, svc corev1.Service) (ctrl.Result, error) {
+	if err := c.SynNodes(ctx); err != nil {
 		return ctrl.Result{}, err
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	k, err := client.ObjectKeyFromObject(&svc)
-	if err != nil {
-		c.Log.Error(err, "object key")
-		return ctrl.Result{}, err
-	}
+	k := client.ObjectKeyFromObject(&svc)
 	log := c.Log.WithValues("request", k.String())
 
 	if svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
 		c.Log.Info("removing non loadbalancer service")
-		if err := c.DeleteService(svc); err != nil {
+		if err := c.DeleteService(ctx, svc); err != nil {
 			return ctrl.Result{}, err
 		}
-		// TODO(adphi): update status
+		var finalizers []string
+		for _, v := range svc.Finalizers {
+			if v != "service.kubernetes.io/load-balancer-cleanup" {
+				finalizers = append(finalizers, v)
+			}
+		}
+		if len(finalizers) == len(svc.Finalizers) {
+			return ctrl.Result{}, nil
+		}
+		svc.Finalizers = finalizers
+		c.Log.Info("removing finalizer")
+		if err := c.client.Update(ctx, &svc); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
-	if svc.Spec.IPFamily != nil && *svc.Spec.IPFamily == corev1.IPv6Protocol {
-		c.rec.Warn(&svc, "Unsupported", "IPv6 not supported")
+	hasV4 := false
+	hasV6 := false
+	for _, v := range svc.Spec.IPFamilies {
+		if v == corev1.IPv4Protocol {
+			hasV4 = true
+		} else {
+			hasV6 = false
+			c.rec.Warn(&svc, "Unsupported", "IPv6 not supported")
+		}
+	}
+	if !hasV4 && hasV6 {
 		c.Log.Info("ipv6 unsupported")
 		return ctrl.Result{}, nil
 	}
 	es := corev1.Endpoints{}
-	if err := c.client.Get(c.ctx, k, &es); err != nil {
+	if err := c.client.Get(ctx, k, &es); err != nil {
 		log.Error(err, "retrieve endpoint")
 		return ctrl.Result{}, err
 	}
@@ -204,7 +220,7 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		return ctrl.Result{}, nil
 	}
 	c.services.Store(s)
-	ip, old, err := c.prov.Set(s)
+	ip, old, err := c.prov.Set(ctx, s)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -226,7 +242,7 @@ func (c *controller) Reconcile(svc corev1.Service) (ctrl.Result, error) {
 		}
 	}
 	svc.Status.LoadBalancer.Ingress = append(ings, corev1.LoadBalancerIngress{IP: ip})
-	if err := c.client.Status().Update(c.ctx, &svc); err != nil {
+	if err := c.client.Status().Update(ctx, &svc); err != nil {
 		log.Error(err, "failed to update service status")
 		return ctrl.Result{}, err
 	}
