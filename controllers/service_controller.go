@@ -62,13 +62,15 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 	if !s.DeletionTimestamp.IsZero() {
-		log.Info("removing")
-		if err := r.Ctrl.DeleteService(ctx, s); err != nil {
+		log.Info("removing loadbalancer")
+		if ok, err := r.Ctrl.DeleteService(ctx, s); !ok {
 			return ctrl.Result{}, err
 		}
 		if ok := removeFinalizer(&s); !ok {
+			log.Info("no finalizer to remove: skipping")
 			return ctrl.Result{}, nil
 		}
+		log.Info("removing finalizer")
 		if err := r.Update(ctx, &s); err != nil {
 			return ctrl.Result{}, err
 		}

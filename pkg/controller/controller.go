@@ -35,7 +35,7 @@ import (
 
 type Controller interface {
 	Reconcile(ctx context.Context, svc corev1.Service) (ctrl.Result, error)
-	DeleteService(ctx context.Context, svc corev1.Service) error
+	DeleteService(ctx context.Context, svc corev1.Service) (bool, error)
 	NodeMap() nodemap.Map
 	Services() service.Map
 }
@@ -73,7 +73,7 @@ type controller struct {
 	*options
 }
 
-func (c *controller) DeleteService(ctx context.Context, svc corev1.Service) error {
+func (c *controller) DeleteService(ctx context.Context, svc corev1.Service) (bool, error) {
 	k := client.ObjectKeyFromObject(&svc)
 	// TODO(adphi): check public and/or private
 	s := service.Service{
@@ -89,16 +89,17 @@ func (c *controller) DeleteService(ctx context.Context, svc corev1.Service) erro
 			NodePort: v.NodePort,
 		})
 	}
-	c.Log.WithValues("request", k).V(5).Info("deleting service", "service", s.String())
+	c.Log.WithValues("request", k).Info("deleting service", "service", s.String())
 	c.services.Delete(s)
 	ip, err := c.prov.Delete(ctx, s)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !contains(svc.Status.LoadBalancer.Ingress, ip) {
-		c.Log.V(5).Info("skipping status update as IP already not there")
-		return nil
+		c.Log.Info("skipping status update as IP already not there")
+		return true, nil
 	}
+	c.Log.Info("removing IP from status")
 	// TODO(adphi): we could loose the loadbalancer IP track if we successfully removed the loadbalancer but failed to update the status
 	var ings []corev1.LoadBalancerIngress
 	for _, v := range svc.Status.LoadBalancer.Ingress {
@@ -109,9 +110,9 @@ func (c *controller) DeleteService(ctx context.Context, svc corev1.Service) erro
 	svc.Status.LoadBalancer.Ingress = ings
 	if err := c.client.Status().Update(ctx, &svc); err != nil {
 		c.Log.Error(err, "failed to remove loadbalancer ip from status")
-		return err
+		return false, err
 	}
-	return nil
+	return false, nil
 }
 
 func (c *controller) SynNodes(ctx context.Context) error {
@@ -141,7 +142,7 @@ func (c *controller) Reconcile(ctx context.Context, svc corev1.Service) (ctrl.Re
 
 	if svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
 		c.Log.Info("removing non loadbalancer service")
-		if err := c.DeleteService(ctx, svc); err != nil {
+		if ok, err := c.DeleteService(ctx, svc); !ok {
 			return ctrl.Result{}, err
 		}
 		var finalizers []string
