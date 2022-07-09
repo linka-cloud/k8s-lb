@@ -216,10 +216,6 @@ func (c *controller) Reconcile(ctx context.Context, svc corev1.Service) (ctrl.Re
 	default:
 		s.AddNodeIPs(c.MakeClusterEndpoints(log)...)
 	}
-	if o, ok := c.services.Load(s); ok && o.Equals(s) {
-		log.V(5).Info("skipping as service did not changed", "service", s.String())
-		return ctrl.Result{}, nil
-	}
 	c.services.Store(s)
 	ip, old, err := c.prov.Set(ctx, s)
 	if err != nil {

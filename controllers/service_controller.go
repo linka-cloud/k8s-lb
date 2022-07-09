@@ -19,7 +19,6 @@ package controllers
 import (
 	"context"
 
-	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,7 +37,6 @@ const (
 // ServiceReconciler reconciles a Service object
 type ServiceReconciler struct {
 	client.Client
-	Log    logr.Logger
 	Scheme *runtime.Scheme
 	Ctrl   controller.Controller
 }
@@ -50,7 +48,7 @@ type ServiceReconciler struct {
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("service", req.NamespacedName)
+	log := ctrl.LoggerFrom(ctx).WithValues("service", req.NamespacedName)
 
 	// your logic here
 	s := corev1.Service{}
