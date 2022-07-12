@@ -20,73 +20,16 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-func NewMap() Map {
-	return &svcmap{}
-}
-
-type Map interface {
-	Load(service Service) (Service, bool)
-	Store(svc Service)
-	LoadOrStore(svc Service) (actual Service, loaded bool)
-	LoadAndDelete(svc Service) (Service, bool)
-	Delete(svc Service)
-	Range(func(svc Service) (shouldContinue bool))
-}
-
-type svcmap struct {
-	m sync.Map
-}
-
-func (s *svcmap) Load(service Service) (Service, bool) {
-	i, ok := s.m.Load(service.key())
-	if !ok {
-		return Service{}, false
-	}
-	return i.(Service), ok
-}
-
-func (s *svcmap) Store(svc Service) {
-	s.m.Store(svc.key(), svc)
-}
-
-func (s *svcmap) LoadOrStore(svc Service) (actual Service, loaded bool) {
-	i, ok := s.m.LoadOrStore(svc.key(), svc)
-	if !ok {
-		return Service{}, false
-	}
-	return i.(Service), ok
-}
-
-func (s *svcmap) LoadAndDelete(svc Service) (Service, bool) {
-	i, ok := s.m.LoadAndDelete(svc.key())
-	if !ok {
-		return Service{}, false
-	}
-	return i.(Service), ok
-}
-
-func (s *svcmap) Delete(svc Service) {
-	s.m.Delete(svc.key())
-}
-
-func (s *svcmap) Range(f func(svc Service) (shouldContinue bool)) {
-	s.m.Range(func(key, value interface{}) bool {
-		return f(value.(Service))
-	})
-}
 
 type Service struct {
 	Key         client.ObjectKey
 	Ports       []Port
 	NodeIPs     []string
 	RequestedIP string
-	IP          string
 	Private     bool
 	Src         corev1.Service
 }

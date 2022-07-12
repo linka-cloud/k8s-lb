@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -37,7 +38,6 @@ type Controller interface {
 	Reconcile(ctx context.Context, svc corev1.Service) (ctrl.Result, error)
 	DeleteService(ctx context.Context, svc corev1.Service) (bool, error)
 	NodeMap() nodemap.Map
-	Services() service.Map
 }
 
 func New(ctx context.Context, client client.Client, rec recorder.Recorder, prov provider.Provider, opts ...Option) (Controller, error) {
@@ -55,21 +55,19 @@ func New(ctx context.Context, client client.Client, rec recorder.Recorder, prov 
 		v(&o)
 	}
 	return &controller{
-		client:   client,
-		rec:      rec,
-		prov:     prov,
-		services: service.NewMap(),
-		options:  &o,
+		client:  client,
+		rec:     rec,
+		prov:    prov,
+		options: &o,
 	}, nil
 }
 
 type controller struct {
-	client   client.Client
-	prov     provider.Provider
-	rec      recorder.Recorder
-	nodes    nodemap.Map
-	services service.Map
-	mu       sync.RWMutex
+	client client.Client
+	prov   provider.Provider
+	rec    recorder.Recorder
+	nodes  nodemap.Map
+	mu     sync.RWMutex
 	*options
 }
 
@@ -90,7 +88,6 @@ func (c *controller) DeleteService(ctx context.Context, svc corev1.Service) (boo
 		})
 	}
 	c.Log.WithValues("request", k).Info("deleting service", "service", s.String())
-	c.services.Delete(s)
 	ip, err := c.prov.Delete(ctx, s)
 	if err != nil {
 		return false, err
@@ -108,6 +105,14 @@ func (c *controller) DeleteService(ctx context.Context, svc corev1.Service) (boo
 		}
 	}
 	svc.Status.LoadBalancer.Ingress = ings
+	svc.Status.Conditions = append(svc.Status.Conditions, metav1.Condition{
+		Type:               "LoadBalancerServiceDeleted",
+		Status:             metav1.StatusSuccess,
+		ObservedGeneration: svc.Generation,
+		LastTransitionTime: metav1.Now(),
+		Reason:             "LoadBalancerCleanUp",
+		Message:            "",
+	})
 	if err := c.client.Status().Update(ctx, &svc); err != nil {
 		c.Log.Error(err, "failed to remove loadbalancer ip from status")
 		return false, err
@@ -216,7 +221,6 @@ func (c *controller) Reconcile(ctx context.Context, svc corev1.Service) (ctrl.Re
 	default:
 		s.AddNodeIPs(c.MakeClusterEndpoints(log)...)
 	}
-	c.services.Store(s)
 	ip, old, err := c.prov.Set(ctx, s)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -239,6 +243,14 @@ func (c *controller) Reconcile(ctx context.Context, svc corev1.Service) (ctrl.Re
 		}
 	}
 	svc.Status.LoadBalancer.Ingress = append(ings, corev1.LoadBalancerIngress{IP: ip})
+	svc.Status.Conditions = append(svc.Status.Conditions, metav1.Condition{
+		Type:               "LoadBalancerServiceSynced",
+		Status:             metav1.StatusSuccess,
+		ObservedGeneration: svc.Generation,
+		LastTransitionTime: metav1.Now(),
+		Reason:             "LoadBalancerSync",
+		Message:            "",
+	})
 	if err := c.client.Status().Update(ctx, &svc); err != nil {
 		log.Error(err, "failed to update service status")
 		return ctrl.Result{}, err
@@ -274,10 +286,6 @@ func (c *controller) MakeClusterEndpoints(_ logr.Logger) []string {
 
 func (c *controller) NodeMap() nodemap.Map {
 	return c.nodes
-}
-
-func (c *controller) Services() service.Map {
-	return c.services
 }
 
 func contains(ings []corev1.LoadBalancerIngress, ip string) bool {

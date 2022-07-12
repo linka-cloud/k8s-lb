@@ -90,7 +90,6 @@ func main() {
 
 	if err = (&controllers.ServiceReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("Service"),
 		Scheme: mgr.GetScheme(),
 		Ctrl:   controller,
 	}).SetupWithManager(ctx, mgr); err != nil {
