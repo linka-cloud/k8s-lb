@@ -30,6 +30,7 @@ type Service struct {
 	Ports       []Port
 	NodeIPs     []string
 	RequestedIP string
+	IP          string
 	Private     bool
 	Src         corev1.Service
 }
