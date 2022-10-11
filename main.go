@@ -52,8 +52,12 @@ func main() {
 	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
 	defer cancel()
 
-	var metricsAddr string
-	var enableLeaderElection bool
+	var (
+		metricsAddr          string
+		enableLeaderElection bool
+		loadBalancerClass    string
+	)
+	flag.StringVar(&loadBalancerClass, "loadbalancer-class", "", "The optional load balancer class to watch for.")
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
 		"Enable leader election for controller manager. "+
@@ -89,9 +93,10 @@ func main() {
 	}
 
 	if err = (&controllers.ServiceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Ctrl:   controller,
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		Ctrl:              controller,
+		LoadBalancerClass: loadBalancerClass,
 	}).SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Service")
 		os.Exit(1)

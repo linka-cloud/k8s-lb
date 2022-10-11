@@ -37,8 +37,9 @@ const (
 // ServiceReconciler reconciles a Service object
 type ServiceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Ctrl   controller.Controller
+	Scheme            *runtime.Scheme
+	Ctrl              controller.Controller
+	LoadBalancerClass string
 }
 
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;update;patch
@@ -50,13 +51,21 @@ type ServiceReconciler struct {
 func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx).WithValues("service", req.NamespacedName)
 
-	// your logic here
 	s := corev1.Service{}
 	if err := r.Get(ctx, req.NamespacedName, &s); err != nil {
 		if err := client.IgnoreNotFound(err); err != nil {
 			log.Error(err, "unable to fetch service")
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{}, nil
+	}
+	var lbc string
+	if s.Spec.LoadBalancerClass != nil {
+		lbc = *s.Spec.LoadBalancerClass
+	}
+	// not for us
+	if lbc != r.LoadBalancerClass {
+		log.Info("loadBalancerClass is not our: skipping", "loadBalancerClass", s.Spec.LoadBalancerClass)
 		return ctrl.Result{}, nil
 	}
 	if !s.DeletionTimestamp.IsZero() {
