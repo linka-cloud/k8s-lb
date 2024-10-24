@@ -28,6 +28,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"go.linka.cloud/k8s/lb/controllers"
 	controller2 "go.linka.cloud/k8s/lb/pkg/controller"
@@ -69,11 +70,12 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true), zap.StacktraceLevel(&stacktraceLevel), zap.Level(&level)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: metricsAddr,
-		Port:               9443,
-		LeaderElection:     enableLeaderElection,
-		LeaderElectionID:   "52170f68.lb.k8s.linka.cloud",
+		Scheme: scheme,
+		Metrics: metricserver.Options{
+			BindAddress: metricsAddr,
+		},
+		LeaderElection:   enableLeaderElection,
+		LeaderElectionID: "52170f68.lb.k8s.linka.cloud",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

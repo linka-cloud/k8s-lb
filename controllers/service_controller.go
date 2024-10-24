@@ -25,7 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"go.linka.cloud/k8s/lb/pkg/controller"
 )
@@ -96,7 +95,7 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *ServiceReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Service{}).
-		Watches(&source.Kind{Type: &corev1.Endpoints{}}, &handler.EnqueueRequestForObject{}).
+		Watches(&corev1.Endpoints{}, &handler.EnqueueRequestForObject{}).
 		WithEventFilter(&filter{ctx: ctx, c: mgr.GetClient()}).
 		Complete(r)
 }
